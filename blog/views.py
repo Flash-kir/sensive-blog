@@ -1,9 +1,10 @@
 from django.shortcuts import render
 from blog.models import Comment, Post, Tag
 from django.db.models import Count
+from django.http import Http404
 
 
-def serialize_post_optimized(post):
+def serialize_post(post):
     return {
         'title': post.title,
         'teaser_text': post.text[:200],
@@ -13,7 +14,7 @@ def serialize_post_optimized(post):
         'published_at': post.published_at,
         'slug': post.slug,
         'tags': [serialize_tag(tag) for tag in post.tags.all()],
-        'first_tag_title': post.tags.all().first().title,
+        'first_tag_title': post.tags.first().title,
     }
 
 
@@ -40,10 +41,10 @@ def index(request):
 
     context = {
         'most_popular_posts': [
-            serialize_post_optimized(post) for post in most_popular_posts
+            serialize_post(post) for post in most_popular_posts
         ],
         'page_posts': [
-            serialize_post_optimized(post) for post in most_fresh_posts
+            serialize_post(post) for post in most_fresh_posts
             ],
         'popular_tags': [serialize_tag(tag) for tag in most_popular_tags],
     }
@@ -51,7 +52,11 @@ def index(request):
 
 
 def post_detail(request, slug):
-    post = Post.objects.prefetch_related('author').get(slug=slug)
+    try:
+        post = Post.objects.prefetch_related('author').get(slug=slug)
+    except Post.DoesNotExist:
+        raise Http404("No Post's matches the given query.")
+
     comments = Comment.objects.filter(post=post).prefetch_related('author')
     serialized_comments = []
     for comment in comments:
@@ -89,14 +94,17 @@ def post_detail(request, slug):
         'post': serialized_post,
         'popular_tags': [serialize_tag(tag) for tag in most_popular_tags],
         'most_popular_posts': [
-            serialize_post_optimized(post) for post in most_popular_posts
+            serialize_post(post) for post in most_popular_posts
         ],
     }
     return render(request, 'post-details.html', context)
 
 
 def tag_filter(request, tag_title):
-    tag = Tag.objects.get(title=tag_title)
+    try:
+        tag = Tag.objects.get(title=tag_title)
+    except Tag.DoesNotExist:
+        raise Http404("No Tag's matches the given query.")
 
     most_popular_tags = Tag.objects.popular()[:5] \
                                    .annotate(posts_count=Count('posts'))
@@ -114,9 +122,9 @@ def tag_filter(request, tag_title):
     context = {
         'tag': tag.title,
         'popular_tags': [serialize_tag(tag) for tag in most_popular_tags],
-        'posts': [serialize_post_optimized(post) for post in related_posts],
+        'posts': [serialize_post(post) for post in related_posts],
         'most_popular_posts': [
-            serialize_post_optimized(post) for post in most_popular_posts
+            serialize_post(post) for post in most_popular_posts
         ],
     }
     return render(request, 'posts-list.html', context)
