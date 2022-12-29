@@ -2,6 +2,7 @@ from django.db import models
 from django.urls import reverse
 from django.contrib.auth.models import User
 from django.db.models import Count, Prefetch
+from django.db.models import OuterRef, Subquery
 
 
 class PostQuerySet(models.QuerySet):
@@ -28,7 +29,7 @@ class PostQuerySet(models.QuerySet):
                         )
         )
 
-    def fetch_with_comments_count(self):
+    def fetch_with_comments_count_and_authors_names(self):
         query_posts = self
         query_posts_ids = [post.id for post in query_posts]
         posts_with_comments = Post.objects.filter(
@@ -41,8 +42,18 @@ class PostQuerySet(models.QuerySet):
                                                 )
         count_for_id = dict(ids_and_comments)
 
+        posts_with_authors = User.objects.filter(
+            posts__in=query_posts_ids
+            )
+        ids_and_names = posts_with_authors.values_list(
+                                                'posts',
+                                                'username'
+                                                )
+        name_for_id = dict(ids_and_names)
+
         for post in query_posts:
             post.comments_count = count_for_id[post.id]
+            post.author_name = name_for_id[post.id]
         return self
 
 
@@ -63,6 +74,7 @@ class Post(models.Model):
         User,
         on_delete=models.CASCADE,
         verbose_name='Автор',
+        related_name='posts',
         limit_choices_to={'is_staff': True})
     likes = models.ManyToManyField(
         User,
