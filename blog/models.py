@@ -1,6 +1,55 @@
 from django.db import models
 from django.urls import reverse
 from django.contrib.auth.models import User
+from django.db.models import Count, Prefetch
+
+
+class PostQuerySet(models.QuerySet):
+
+    def year(self, year):
+        """return queryset with posts in 'year',
+        sorted by 'published_at' field"""
+        return self.filter(published_at__year=year).order_by('published_at')
+
+    def popular(self):
+        return self.annotate(num_likes=Count('likes')).order_by('-num_likes')
+
+    def fresh(self):
+        return self.annotate(num_likes=Count('likes')).order_by('-num_likes')
+
+    def prefetch_tags(self):
+        return self.prefetch_related(
+                        Prefetch(
+                            'tags',
+                            queryset=Tag.objects.order_by('title') \
+                                                .annotate(
+                                                    posts_count=Count('posts')
+                                                )
+                        )
+        )
+
+    def fetch_with_comments_count(self):
+        query_posts = self
+        query_posts_ids = [post.id for post in query_posts]
+        posts_with_comments = Post.objects.filter(
+            id__in=query_posts_ids
+            ).annotate(comments_count=Count('comments'))
+
+        ids_and_comments = posts_with_comments.values_list(
+                                                'id',
+                                                'comments_count'
+                                                )
+        count_for_id = dict(ids_and_comments)
+
+        for post in query_posts:
+            post.comments_count = count_for_id[post.id]
+        return self
+
+
+class TagQuerySet(models.QuerySet):
+
+    def popular(self):
+        return self.annotate(num_posts=Count('posts')).order_by('-num_posts')
 
 
 class Post(models.Model):
@@ -24,6 +73,7 @@ class Post(models.Model):
         'Tag',
         related_name='posts',
         verbose_name='Теги')
+    objects = PostQuerySet.as_manager()
 
     def __str__(self):
         return self.title
@@ -42,6 +92,7 @@ class Post(models.Model):
 
 class Tag(models.Model):
     title = models.CharField('Тег', max_length=20, unique=True)
+    objects = TagQuerySet.as_manager()
 
     def __str__(self):
         return self.title
@@ -61,10 +112,12 @@ class Tag(models.Model):
 class Comment(models.Model):
     post = models.ForeignKey(
         'Post',
+        related_name='comments',
         on_delete=models.CASCADE,
         verbose_name='Пост, к которому написан')
     author = models.ForeignKey(
         User,
+        related_name='comments',
         on_delete=models.CASCADE,
         verbose_name='Автор')
 
